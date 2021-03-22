@@ -1,94 +1,118 @@
-from bs4 import BeautifulSoup as bs
-import requests
-import pymongo
 from splinter import Browser
-from flask import Flask, render_template, redirect
+from bs4 import BeautifulSoup as bs
 import pandas as pd
+import requests
 from webdriver_manager.chrome import ChromeDriverManager
 
-def init_browser():
+data = {}
+
+
+def scrape_all():
+    # Initiate headless driver for deployment
     executable_path = {'executable_path': ChromeDriverManager().install()}
-    return Browser('chrome', **executable_path, headless=False)
+    browser = Browser('chrome', **executable_path, headless=False)
 
-def scrape():
-    browser = init_browser()
-    mars_dict = {}
+    mars_news(browser)
+    featured_image(browser)
+    mars_facts()
+    hemispheres(browser)
 
+    browser.quit()
 
-### NASA Mars News
-url = "https://mars.nasa.gov/news"
-browser.visit(url)
-html = browser.html
-news_soup = bs(html, 'html.parser')
-# news_soup
-
-news = news_soup.select_one('ul.item_list li.slide')
-news
-
-title = news.find_all('div', class_='content_title')
-news_title = title[0].text.strip()
-news_title
-
-para = news.find_all('div', class_='article_teaser_body')
-news_p = para[0].text.strip()
-news_p
+    return data
 
 
-### JPL Mars Space Images - Featured Image
+# NASA Mars News
+def mars_news(browser):
+    url = "https://mars.nasa.gov/news/"
+    browser.visit(url)
 
-url = 'https://data-class-jpl-space.s3.amazonaws.com/JPL_Space/index.html'
-browser.visit(url)
-html = browser.html
-image_soup = bs(html, 'html.parser')
-# image_soup
+    html = browser.html
+    news_soup = bs(html, "html.parser")
 
-images = image_soup.find_all('div', class_='floating_text_area')
-images
+    try:
+        news = news_soup.select_one("ul.item_list li.slide")
+        news_title = news.find("div", class_="content_title").get_text()
+        news_p = news.find(
+            "div", class_="article_teaser_body").get_text()
 
-for img in images:
-    link = img.find('a')
-    href = link['href']
-    print( 'https://data-class-jpl-space.s3.amazonaws.com/JPL_Space/' + href )
-featured_image_url = 'https://data-class-jpl-space.s3.amazonaws.com/JPL_Space/' + href
+    except AttributeError:
+        return None, None
+
+    data["news_title"] = news_title
+    data["news_paragraph"] = news_p
+
+    return
 
 
-### Mars Facts
+# JPL Mars Space Images - Featured Image
+def featured_image(browser):
+    url = 'https://spaceimages-mars.com'
+    browser.visit(url)
 
-df = pd.read_html('https://space-facts.com/mars/')[0]
-df.columns=['description', 'value']
-df.set_index('description', inplace=True)
-df
+    html = browser.html
+    image_soup = bs(html, 'html.parser')
 
-fact_table = df.to_html()
-fact_table
+    try:
+        image = image_soup.select_one('div.floating_text_area')
+        href = image.find('a', class_='showimg fancybox-thumbs').get("href")
 
-### Mars Hemispheres
+    except AttributeError:
+        return None
 
-url = 'https://astrogeology.usgs.gov/search/results?q=hemisphere+enhanced&k1=target&v1=Mars'
-browser.visit(url)
+    featured_image_url = 'https://spaceimages-mars.com/' + href
+    data["featured_image"] = featured_image_url
 
-hemisphere_image_urls = []
-links = browser.find_by_css("a.product-item h3")
+    return
 
-for i in range(len(links)):
-    hemisphere = {}
-    
-    browser.find_by_css("a.product-item h3")[i].click()
 
-    sample_elem = browser.links.find_by_text('Sample').first
-    hemisphere['img_url'] = sample_elem['href']
+# Mars Facts
+def mars_facts():
+    try:
+        df = pd.read_html("http://space-facts.com/mars/")[0]
+    except BaseException:
+        return None
 
-    hemisphere['title'] = browser.find_by_css("h2.title").text
+    df.columns = ["description", "value"]
+    data["facts"] = df.to_html(index=False)
 
-    hemisphere_image_urls.append(hemisphere)
+    return
 
-    browser.back()
 
-hemisphere_image_urls
+# Mars Hemispheres
+def hemispheres(browser):
+    url = (
+        "https://astrogeology.usgs.gov/search/"
+        "results?q=hemisphere+enhanced&k1=target&v1=Mars"
+    )
 
-mars_dict={
-        "News Title":news_title,
-        "News Paragraph Text":news_p,
-        "Featured Image Url":featured_image_url,
-        "Facts Table":fact_table,
-        "Hemisphere Images":hemisphere_image_urls}
+    browser.visit(url)
+    browser.is_element_present_by_text(
+        "USGS Astrogeology Science Center", wait_time=1)
+
+    hemisphere_image_urls = []
+
+    for i in range(4):
+        hemisphere = {}
+
+        browser.find_by_css("a.product-item h3")[i].click()
+
+        html = browser.html
+        hemi_soup = bs(html, "html.parser")
+
+        hemisphere['title'] = hemi_soup.find("h2", class_="title").get_text()
+        hemisphere['img_url'] = hemi_soup.find("a", text="Sample").get("href")
+
+        hemisphere_image_urls.append(hemisphere)
+
+        browser.back()
+
+    data["hemispheres"] = hemisphere_image_urls
+
+    return
+
+
+if __name__ == "__main__":
+
+    # If running as script, print scraped data
+    print()
